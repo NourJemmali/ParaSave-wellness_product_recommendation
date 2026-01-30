@@ -89,3 +89,57 @@ flowchart TB
     style EXPLAIN fill:#fce4ec
     style UI fill:#e1f5ff  
 ```
+## Qdrant Integration
+
+### Overview
+
+Our solution leverages Qdrant as a vector database to enable intelligent ingredient matching and recipe recommendations through a hybrid search approach that combines semantic understanding with precise similarity scoring.
+
+### Data Preparation & Storage
+
+#### Vector Conversion
+
+**Dense Vectors (Semantic Embeddings)**
+- Raw ingredient data is converted into dense vector embeddings
+- These embeddings capture the semantic meaning and relationships between ingredients
+- Enables understanding of ingredient similarities beyond exact keyword matches
+
+**Sparse Vectors (Custom Scoring)**
+- Ingredients are scored using an exponential decay function based on their position:
+  ```
+  weight = e^(-k × position)
+  ```
+  where:
+  - `k = 0.65` (decay constant)
+  - `position` = the position of the ingredient in the list
+- This formula assigns higher weights to ingredients appearing earlier in the recipe, with weights decreasing exponentially for later positions
+- The calculated weights are then converted into sparse vector representations
+- Provides precise, position-aware similarity matching that reflects ingredient importance
+
+**Payload Metadata**
+- Additional ingredient attributes and metadata are stored as Qdrant payloads
+- Allows for efficient filtering and retrieval of supplementary information
+
+### Query Processing
+
+#### Input Processing Pipeline
+
+1. **Ingredient Extraction & Vectorization**
+   - User input is processed to extract ingredient information
+   - Extracted ingredients are converted into both dense and sparse vectors using the same approach as the stored data
+
+2. **Metadata Filtering**
+   - Category and budget constraints are extracted from the user query
+   - Applied as filters before vector search to narrow the search space
+
+3. **Hybrid Search Execution**
+   - **Semantic Search (Dense Vectors)**: Finds ingredients with similar semantic meaning
+   - **Similarity Search (Sparse Vectors)**: Matches based on our custom exponential decay scoring
+   - Results from both search methods are combined to provide optimal recommendations
+
+### Benefits of This Approach
+
+- **Semantic Understanding**: Dense vectors capture ingredient relationships and context
+- **Precision Scoring**: Sparse vectors apply our custom domain logic for accurate matching
+- **Efficient Filtering**: Payload-based filtering reduces search space before vector operations
+- **Hybrid Results**: Combining both search methods provides more relevant and accurate recommendations than either approach alone
