@@ -141,8 +141,8 @@ Your response:"""
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {str(e)}"
-final_prompt=
-"""
+
+final_prompt="""
 You are comparing a reference product to similar alternatives found via vector search. 
 
 **REFERENCE PRODUCT:**

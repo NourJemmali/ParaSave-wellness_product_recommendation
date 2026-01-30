@@ -7,14 +7,14 @@ from qdrant_client.models import (
     NamedVector,
     SparseVector,
     NamedSparseVector,
-    ScoredPointConfigWithVectorsConfig,
+    RecommendInput,
     VectorStruct,
     Fusion,
 )
 import torch
 from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
-from dotenv import loadenv
-loadenv()
+from dotenv import load_dotenv
+load_dotenv()
 
 model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -58,16 +58,19 @@ def search_products(
     query_sparse = SparseVector(indices=query_indices, values=query_values)
     # Hybrid search
     response = client.query_points(
-        "products",
+        collection_name="products",
         query=NamedVector(name="dense", vector=query_dense),
         query_sparse=[NamedSparseVector(name="sparse", vector=query_sparse)],
-        limit=10,
-        filter=price_category_filter,
-        score=ScoredPointConfigWithVectorsConfig(
-            dense=[VectorStruct(name="dense")],
-            sparse=[VectorStruct(name="sparse")],
-            fusion=Fusion.RRF,
+        filter=Filter( 
+            must=[
+                FieldCondition(key="price", range=Range(lte=budget)),
+                FieldCondition(key="category", match=MatchValue(value=category))
+            ]
         ),
+        limit=10,
+        score=RecommendInput( 
+            fusion=Fusion.RRF
+        )
     )
 
     return response
@@ -93,12 +96,12 @@ def get_alternatives( ingredients, category, budget):
 
 
 #example
-results = search_products(
-    query_text="Aqua, Ethylhexyl Salicylate, Methylene Bis-Benzotriazolyl Tetramethylbutylphenol",  # Parse from query
-    query_ingredients=["Aqua", "Ethylhexyl Salicylate", "Methylene Bis-Benzotriazolyl Tetramethylbutylphenol"],  # Parse from query
-    budget=30.0,
-    category="solar",
-    vocab=vocab,
-    model=model,
-    client=client,
-)
+# results = search_products(
+#     query_text="Aqua, Ethylhexyl Salicylate, Methylene Bis-Benzotriazolyl Tetramethylbutylphenol",  # Parse from query
+#     query_ingredients=["Aqua", "Ethylhexyl Salicylate", "Methylene Bis-Benzotriazolyl Tetramethylbutylphenol"],  # Parse from query
+#     budget=30.0,
+#     category="solar",
+#     vocab=vocab,
+#     model=model,
+#     client=client,
+# )
