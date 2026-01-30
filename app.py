@@ -1,3 +1,4 @@
+from urllib import response
 import streamlit as st
 import base64
 from groq import Groq
@@ -5,7 +6,7 @@ import os
 from PIL import Image
 import io
 from dotenv import load_dotenv
-
+from utils import get_alternatives
 # Load environment variables from .env file
 load_dotenv()
 
@@ -140,13 +141,74 @@ Your response:"""
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {str(e)}"
+final_prompt=
+"""
+You are comparing a reference product to similar alternatives found via vector search. 
 
+**REFERENCE PRODUCT:**
+- Name: {product_name}
+- Key Ingredients (in order of importance): {ingredients}
+
+**ALTERNATIVES** :
+{alternatives}
+
+**TASK:** For each alternative, create an HTML comparison card explaining:
+1. **Overall Similarity Score** (0-100%) - semantic + ingredient overlap
+2. **Ingredient Match Breakdown** - which ingredients match, position similarity  
+3. **Price/Category Confirmation** - budget fit + category match
+4. **Why This Is A Good Alternative** - clear reasoning
+
+**OUTPUT REQUIREMENTS:**
+- Return ONLY valid HTML (no markdown, no code blocks)
+- Beautiful gradient cards (modern design)
+- Green highlights for ✅ matches, orange ⚠️ for partial, red ❌ for missing
+- Top 3-5 alternatives only
+- Professional, scannable layout for e-commerce app
+
+**EXAMPLE HTML STRUCTURE:**
+html
+<div style='display: flex; flex-direction: column; gap: 1.5rem;'>
+  <div style='background: linear-gradient(135deg, #4ade80, #22c55e); color: white; padding: 1.5rem; border-radius: 15px;'>
+    <div style='display: flex; justify-content: space-between;'>
+      <h3>🥇 Alternative #1 - Brand Product ($12.99)</h3>
+      <span style='font-size: 1.3rem; font-weight: bold;'>95%</span>
+    </div>
+    <div style='background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 10px; margin-top: 1rem;'>
+      <p><strong>✅ Ingredients Match (9/10):</strong> nuts, milk, sugar <span style='color: #86efac'>✓ same positions</span></p>
+      <p><strong>✅ Price:</strong> Under budget | <strong>✅ Category:</strong> Shampoo</p>
+      <p><em>Excellent match - identical top 3 ingredients in same order</em></p>
+    </div>
+  </div>
+</div>"""
+def get_alternatives_html(product_name, ingredients, category, budget):
+    client = get_groq_client()
+    alternatives= get_alternatives(
+        ingredients=ingredients,
+        category=category,
+        budget=budget)
+    # Generate HTML for alternatives
+    response = client.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": final_prompt.format(
+                product_name=product_name,
+                ingredients=", ".join(ingredients),
+                category=category,
+                budget=budget
+            )}
+            ],
+            temperature=0.1,
+            max_tokens=1000
+        )
+
+    return response.choices[0].message.content
 # Streamlit UI
 def main():
     st.set_page_config(page_title="Product Information Extractor", layout="wide")
     
-    st.title("🛍️ Product Information Extractor")
-    st.markdown("Extract product details and ingredients from images using Groq Vision AI")
+    st.title("🛍️ Product Information Extractor & Alternatives Finder")
+    st.markdown("Extract product details and find **budget-friendly alternatives** using AI-powered search")
     
     # Initialize Groq client
     client = get_groq_client()
@@ -155,9 +217,9 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.subheader("Product Image")
+        st.subheader("📦 Product Image")
         product_image = st.file_uploader(
-            "Upload product image (shows name & brand)",
+            "Upload product image", 
             type=['png', 'jpg', 'jpeg'],
             key="product"
         )
@@ -165,9 +227,9 @@ def main():
             st.image(product_image, caption="Product Image", use_container_width=True)
     
     with col2:
-        st.subheader("Ingredients Image")
+        st.subheader("🧪 Ingredients Image")
         ingredients_image = st.file_uploader(
-            "Upload ingredients/description image",
+            "Upload ingredients list", 
             type=['png', 'jpg', 'jpeg'],
             key="ingredients"
         )
@@ -175,77 +237,88 @@ def main():
             st.image(ingredients_image, caption="Ingredients Image", use_container_width=True)
     
     with col3:
-        st.subheader("Budget")
+        st.subheader("💰 Budget")
         budget = st.number_input(
-            "Enter budget amount",
+            "Max budget per alternative ($)",
             min_value=0.000,
-            value=0.000,
-            step=0.001,
-            format="%.3f"
+            value=10.000,
+            step=0.100,
+            format="%.2f"
         )
-        st.metric("Current Budget", f"${budget:.3f}")
+        st.metric("🔎 Searching alternatives under", f"${budget:.2f}")
     
     # Process button
     st.markdown("---")
     
-    if st.button("🔍 Extract Information", type="primary", use_container_width=True):
+    if st.button("🚀 Extract & Find Alternatives", type="primary", use_container_width=True):
         if not product_image or not ingredients_image:
-            st.warning("⚠️ Please upload both images before extracting information.")
+            st.warning("⚠️ Please upload **both images** and set your budget!")
         else:
-            with st.spinner("Analyzing images with Groq Vision AI..."):
+            with st.spinner("🔍 Analyzing images + searching alternatives..."):
                 # Encode images
                 product_b64 = encode_image(product_image)
                 ingredients_b64 = encode_image(ingredients_image)
                 
-                # Create results columns
-                result_col1, result_col2 = st.columns(2)
+                # Extract information
+                with st.spinner("Extracting product details..."):
+                    product_info = extract_product_info(client, product_b64)
+                    category = extract_category(client, product_b64)
+                    ingredients_list = extract_ingredients(client, ingredients_b64)
                 
-                with result_col1:
-                    st.subheader("📦 Product Information")
-                    with st.spinner("Extracting product name and brand..."):
-                        product_info = extract_product_info(client, product_b64)
-                        st.markdown(product_info)
-                    
-                    st.subheader("🏷️ Product Category")
-                    with st.spinner("Identifying category..."):
-                        category = extract_category(client, product_b64)
-                        if "not one of the categories" in category.lower():
-                            st.warning(f"⚠️ {category}")
-                        else:
-                            st.success(f"**Category:** {category}")
+                # Extract clean ingredients list (you may need to parse this)
+                ingredients_clean = parse_ingredients_list(ingredients_list)  # Your parsing func
                 
-                with result_col2:
-                    st.subheader("🧪 Ingredients/Composition")
-                    with st.spinner("Extracting ingredients..."):
-                        ingredients_info = extract_ingredients(client, ingredients_b64)
-                        st.markdown(ingredients_info)
+                # CALL get_alternatives FUNCTION
+                st.info("🎯 Finding similar alternatives...")
+                alternatives_html = get_alternatives_html(
+                    product_name=product_info,
+                    ingredients=ingredients_clean,
+                    category=category,
+                    budget=budget
+                )
                 
-                # Display budget info
-                st.markdown("---")
-                st.info(f"💰 Budget allocated for this product: ${budget:.3f}")
+                # BEAUTIFUL RESULTS DISPLAY
+                st.markdown("## 🎉 **Results**")
                 
-                # Summary section
-                st.subheader("📋 Summary")
-                summary_data = {
-                    "Budget": f"${budget:.3f}",
-                    "Category": category,
-                    "Product Analysis": "Completed ✅",
-                    "Ingredients Analysis": "Completed ✅"
-                }
+                # Product Summary Card
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                           padding: 2rem; border-radius: 15px; color: white; margin-bottom: 2rem;'>
+                    <h2 style='margin: 0 0 1rem 0;'>📦 **Original Product**</h2>
+                    <div style='font-size: 1.1rem; line-height: 1.6;'>
+                        <strong>Category:</strong> """ + category + """<br>
+                        <strong>Budget:</strong> $""" + str(budget) + """<br>
+                        <strong>Key Ingredients:</strong> """ + ", ".join(ingredients_clean[:5]) + """
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                for key, value in summary_data.items():
-                    st.write(f"**{key}:** {value}")
-
+                # Alternatives Results
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
+                           padding: 1.5rem; border-radius: 15px; color: white; margin-bottom: 1rem;'>
+                    <h3 style='margin: 0;'>🔄 **Budget-Friendly Alternatives**</h3>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # RENDER ALTERNATIVES HTML
+                st.markdown(alternatives_html, unsafe_allow_html=True)
+    
     # Footer
     st.markdown("---")
-    st.markdown(
-        """
-        <div style='text-align: center'>
-            <p>Powered by Groq Vision AI | Multilingual Support Enabled</p>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div style='text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 10px;'>
+        <h4>✨ Powered by Groq Vision AI + Qdrant Vector Search</h4>
+        <p><em>Find the best alternatives within your budget instantly!</em></p>
+    </div>
+    """, unsafe_allow_html=True)
+
+# Helper function to parse ingredients (adjust as needed)
+def parse_ingredients_list(ingredients_text):
+    """Extract clean list of ingredients from AI response"""
+    # Simple parsing - replace with your actual logic
+    ingredients = [ing.strip() for ing in ingredients_text.split(',') if ing.strip()]
+    return ingredients[:10]  # Top 10 ingredients
 
 if __name__ == "__main__":
     main()
