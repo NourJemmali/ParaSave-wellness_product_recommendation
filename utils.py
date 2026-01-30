@@ -14,6 +14,8 @@ from qdrant_client.models import (
 import torch
 from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
 from dotenv import load_dotenv
+
+# Load environment variables from .env file
 load_dotenv()
 
 model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
@@ -58,19 +60,16 @@ def search_products(
     query_sparse = SparseVector(indices=query_indices, values=query_values)
     # Hybrid search
     response = client.query_points(
-        collection_name="products",
+        "products",
         query=NamedVector(name="dense", vector=query_dense),
         query_sparse=[NamedSparseVector(name="sparse", vector=query_sparse)],
-        filter=Filter( 
-            must=[
-                FieldCondition(key="price", range=Range(lte=budget)),
-                FieldCondition(key="category", match=MatchValue(value=category))
-            ]
-        ),
         limit=10,
-        score=RecommendInput( 
-            fusion=Fusion.RRF
-        )
+        filter=price_category_filter,
+        score=RecommendInput(
+            dense=[VectorStruct(name="dense")],
+            sparse=[VectorStruct(name="sparse")],
+            fusion=Fusion.RRF,
+        ),
     )
 
     return response
@@ -93,8 +92,6 @@ def get_alternatives( ingredients, category, budget):
         if item_category == category.lower() and item_price <= budget:
             filtered_results.append(item)
     return filtered_results
-
-
 #example
 # results = search_products(
 #     query_text="Aqua, Ethylhexyl Salicylate, Methylene Bis-Benzotriazolyl Tetramethylbutylphenol",  # Parse from query
