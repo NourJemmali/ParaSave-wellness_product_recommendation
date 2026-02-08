@@ -7,6 +7,7 @@ from PIL import Image
 import io
 from dotenv import load_dotenv
 from utils import get_alternatives
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -141,73 +142,139 @@ Your response:"""
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {str(e)}"
-final_prompt=
-"""
+
+final_prompt = """
 You are comparing a reference product to similar alternatives found via vector search. 
 
 **REFERENCE PRODUCT:**
 - Name: {product_name}
 - Key Ingredients (in order of importance): {ingredients}
 
-**ALTERNATIVES** :
+**ALTERNATIVES:**
 {alternatives}
 
 **TASK:** For each alternative, create an HTML comparison card explaining:
 1. **Overall Similarity Score** (0-100%) - semantic + ingredient overlap
 2. **Ingredient Match Breakdown** - which ingredients match, position similarity  
 3. **Price/Category Confirmation** - budget fit + category match
-4. **Why This Is A Good Alternative** - clear reasoning
+4. **Product Link** - clickable "View Product" button with the URL
+5. **Why This Is A Good Alternative** - clear reasoning
 
 **OUTPUT REQUIREMENTS:**
 - Return ONLY valid HTML (no markdown, no code blocks)
 - Beautiful gradient cards (modern design)
 - Green highlights for ✅ matches, orange ⚠️ for partial, red ❌ for missing
+- **MUST include clickable link button** for each product using the URL provided
 - Top 3-5 alternatives only
 - Professional, scannable layout for e-commerce app
 
 **EXAMPLE HTML STRUCTURE:**
-html
 <div style='display: flex; flex-direction: column; gap: 1.5rem;'>
   <div style='background: linear-gradient(135deg, #4ade80, #22c55e); color: white; padding: 1.5rem; border-radius: 15px;'>
-    <div style='display: flex; justify-content: space-between;'>
-      <h3>🥇 Alternative #1 - Brand Product ($12.99)</h3>
+    <div style='display: flex; justify-content: space-between; align-items: center;'>
+      <h3>🥇 Alternative #1 - Brand Product (12.99dt)</h3>
       <span style='font-size: 1.3rem; font-weight: bold;'>95%</span>
     </div>
     <div style='background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 10px; margin-top: 1rem;'>
       <p><strong>✅ Ingredients Match (9/10):</strong> nuts, milk, sugar <span style='color: #86efac'>✓ same positions</span></p>
       <p><strong>✅ Price:</strong> Under budget | <strong>✅ Category:</strong> Shampoo</p>
       <p><em>Excellent match - identical top 3 ingredients in same order</em></p>
+      <a href="https://example.com/product" target="_blank" 
+         style='display: inline-block; margin-top: 1rem; padding: 0.75rem 1.5rem; 
+                background: white; color: #22c55e; border-radius: 8px; 
+                text-decoration: none; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+        🛒 View Product
+      </a>
     </div>
   </div>
-</div>"""
+</div>
+"""
+
 def get_alternatives_html(product_name, ingredients, category, budget):
+    """Generate HTML for alternatives using Groq"""
     client = get_groq_client()
-    alternatives= get_alternatives(
+    
+    # Get alternatives from Qdrant
+    alternatives = get_alternatives(
         ingredients=ingredients,
         category=category,
-        budget=budget)
+        budget=budget
+    )
+    
+    # Check if we got results
+    if not alternatives:
+        return """
+        <div style='background: linear-gradient(135deg, #fbbf24, #f59e0b); 
+                   padding: 2rem; border-radius: 15px; color: white; text-align: center;'>
+            <h3>⚠️ No alternatives found</h3>
+            <p>Try adjusting your budget or check if the category is correct.</p>
+        </div>
+        """
+    
+    # Format alternatives for prompt
+    alternatives_text = ""
+    for i, alt in enumerate(alternatives[:5], 1):
+        payload = alt.payload
+        score = alt.score if hasattr(alt, 'score') else 0
+        alternatives_text += f"""
+Alternative {i}:
+- Name: {payload.get('product_name', 'Unknown')}
+- Brand: {payload.get('product_brand', 'Unknown')}
+- Price: {payload.get('price', 0):.2f}dt
+- URL: {payload.get('url', 'Not available')}
+- Similarity Score: {score:.3f}
+- Ingredients: {payload.get('ingredients', 'Not available')[:200]}...
+
+"""
+    
     # Generate HTML for alternatives
-    response = client.chat.completions.create(
+    try:
+        response = client.chat.completions.create(
             model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "system", "content": "You are a helpful assistant that generates beautiful HTML for product comparisons."},
                 {"role": "user", "content": final_prompt.format(
-                product_name=product_name,
-                ingredients=", ".join(ingredients),
-                category=category,
-                budget=budget
-            )}
+                    product_name=product_name,
+                    ingredients=", ".join(ingredients[:10]),
+                    alternatives=alternatives_text
+                )}
             ],
             temperature=0.1,
-            max_tokens=1000
+            max_tokens=2000
         )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error generating alternatives HTML: {e}")
+        return f"<p>Error: {str(e)}</p>"
 
-    return response.choices[0].message.content
+
+# Helper function to parse ingredients (✅ FIXED: use semicolon)
+def parse_ingredients_list(ingredients_text):
+    """Extract clean list of ingredients from AI response"""
+    # Remove any markdown, extra text
+    ingredients_text = ingredients_text.strip()
+    
+    # Split by semicolon (as requested in prompt)
+    if ';' in ingredients_text:
+        ingredients = [ing.strip() for ing in ingredients_text.split(';') if ing.strip()]
+    else:
+        # Fallback: try comma if semicolon not found
+        ingredients = [ing.strip() for ing in ingredients_text.split(',') if ing.strip()]
+    
+    # Clean up - remove any "Format:" or instruction text
+    ingredients = [ing for ing in ingredients if not ing.lower().startswith(('format', 'ingredient'))]
+    
+    # Lowercase for matching
+    ingredients = [ing.lower() for ing in ingredients]
+    
+    return ingredients[:20]  # Top 20 ingredients
+
+
 # Streamlit UI
 def main():
     st.set_page_config(page_title="Product Information Extractor", layout="wide")
     
-    st.title("🛍️ Product Information Extractor & Alternatives Finder")
+    st.title("🛍️ ParaSave: Wellnes Product Information Extractor & Alternatives Finder")
     st.markdown("Extract product details and find **budget-friendly alternatives** using AI-powered search")
     
     # Initialize Groq client
@@ -239,13 +306,13 @@ def main():
     with col3:
         st.subheader("💰 Budget")
         budget = st.number_input(
-            "Max budget per alternative ($)",
+            "Max budget per alternative (dt)",
             min_value=0.000,
             value=10.000,
             step=0.100,
             format="%.2f"
         )
-        st.metric("🔎 Searching alternatives under", f"${budget:.2f}")
+        st.metric("🔎 Searching alternatives under", f"{budget:.2f}dt")
     
     # Process button
     st.markdown("---")
@@ -265,8 +332,22 @@ def main():
                     category = extract_category(client, product_b64)
                     ingredients_list = extract_ingredients(client, ingredients_b64)
                 
-                # Extract clean ingredients list (you may need to parse this)
-                ingredients_clean = parse_ingredients_list(ingredients_list)  # Your parsing func
+                # Display extracted info for debugging
+                with st.expander("🔍 Extracted Information (Debug)"):
+                    st.write("**Product Info:**", product_info)
+                    st.write("**Category:**", category)
+                    st.write("**Raw Ingredients:**", ingredients_list)
+                
+                # Parse ingredients
+                ingredients_clean = parse_ingredients_list(ingredients_list)
+                
+                st.write("**Parsed Ingredients:**", ingredients_clean)
+                
+                # Validate category
+                valid_categories = ["solar", "foodSup", "faceGel"]
+                if category not in valid_categories:
+                    st.error(f"⚠️ Invalid category: {category}. Must be one of: {valid_categories}")
+                    st.stop()
                 
                 # CALL get_alternatives FUNCTION
                 st.info("🎯 Finding similar alternatives...")
@@ -281,14 +362,15 @@ def main():
                 st.markdown("## 🎉 **Results**")
                 
                 # Product Summary Card
-                st.markdown("""
+                st.markdown(f"""
                 <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                            padding: 2rem; border-radius: 15px; color: white; margin-bottom: 2rem;'>
-                    <h2 style='margin: 0 0 1rem 0;'>📦 **Original Product**</h2>
+                    <h2 style='margin: 0 0 1rem 0;'>📦 Original Product</h2>
                     <div style='font-size: 1.1rem; line-height: 1.6;'>
-                        <strong>Category:</strong> """ + category + """<br>
-                        <strong>Budget:</strong> $""" + str(budget) + """<br>
-                        <strong>Key Ingredients:</strong> """ + ", ".join(ingredients_clean[:5]) + """
+                        <strong>Name:</strong> {product_info}<br>
+                        <strong>Category:</strong> {category}<br>
+                        <strong>Budget:</strong> {budget:.2f}dt<br>
+                        <strong>Key Ingredients:</strong> {", ".join(ingredients_clean[:5])}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
@@ -297,7 +379,7 @@ def main():
                 st.markdown("""
                 <div style='background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); 
                            padding: 1.5rem; border-radius: 15px; color: white; margin-bottom: 1rem;'>
-                    <h3 style='margin: 0;'>🔄 **Budget-Friendly Alternatives**</h3>
+                    <h3 style='margin: 0;'>🔄 Budget-Friendly Alternatives</h3>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -312,13 +394,6 @@ def main():
         <p><em>Find the best alternatives within your budget instantly!</em></p>
     </div>
     """, unsafe_allow_html=True)
-
-# Helper function to parse ingredients (adjust as needed)
-def parse_ingredients_list(ingredients_text):
-    """Extract clean list of ingredients from AI response"""
-    # Simple parsing - replace with your actual logic
-    ingredients = [ing.strip() for ing in ingredients_text.split(',') if ing.strip()]
-    return ingredients[:10]  # Top 10 ingredients
 
 if __name__ == "__main__":
     main()
