@@ -15,7 +15,8 @@
 - Detailed explanations for each recommendation
 
 ---
-
+**You can check the demo of the project by clicking [here](https://www.loom.com/share/9783bcb434254f308c25701a2a5a2c24).
+---
 ## 🎯 Objectives
 
 **ParaSave** addresses critical gaps in wellness product shopping:
