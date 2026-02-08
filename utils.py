@@ -16,6 +16,8 @@ from qdrant_client.models import (
 import torch
 from dotenv import load_dotenv
 
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -218,3 +220,4 @@ def get_alternatives(ingredients, category, budget):
     except Exception as e:
         print(f"❌ Error in get_alternatives: {e}")
         return []
+

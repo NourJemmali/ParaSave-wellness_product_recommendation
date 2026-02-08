@@ -144,6 +144,7 @@ Your response:"""
         return f"Error: {str(e)}"
 
 final_prompt = """
+
 You are comparing a reference product to similar alternatives found via vector search. 
 
 **REFERENCE PRODUCT:**
